@@ -83,22 +83,41 @@ x <- x*0.02- 273.15
 plot(x)
 
 # Now we can do a more advanced analysis
-# let's extract daily mean temperatures between 2000 and 2023 
-#temp.daily <- temp.gee$filterDate("2000-01-01" , "2023-12-31") %>%
-#  ee$ImageCollection$filter(ee$Filter$calendarRange(1, 365, 'DAY_OF_YEAR'))
 
 years <- ee$List$sequence(2001 , 2023)
-months <- ee$List$sequence(1 , 12)
+months <- ee$List$sequence(01 , 12)
 
-monthly.temp <- ee$ImageCollection$fromImages(years$map(ee_utils_pyfunc(function(year){
+# monthly.temp <- ee$ImageCollection$fromImages(years$map(ee_utils_pyfunc(function(year){
+#   return(months$map(ee_utils_pyfunc(function(month){
+#     return(temp.gee$filter(ee$Filter$calendarRange(year, year, "year"))$
+#              filter(ee$Filter$calendarRange(month, month, "month"))$
+#              select('LST_Day_1km')$mean()$
+#              set("year", year)$
+#              set("month", month))
+#   })))
+# }))$flatten())
+
+
+monthly.temp <- ee$FeatureCollection(years$map(ee_utils_pyfunc(function(year){
   return(months$map(ee_utils_pyfunc(function(month){
-    return(temp.gee$filter(ee$Filter$calendarRange(year, year, "year"))$
+    
+    monthly.img <- temp.gee$filter(ee$Filter$calendarRange(year, year, "year"))$
              filter(ee$Filter$calendarRange(month, month, "month"))$
-             mean()$
-             set("year", year)$
-             set("month", month))
+             select('LST_Day_1km')$mean()
+    
+    monthly.temp <- monthly.img$clip(mask)$reduceRegion(reducer = ee$Reducer$mean())
+    
+    return(ee$Feature(NULL, list("month_temp" = monthly.temp$get("LST_Day_1km"), 
+                                 'year' = year, 
+                                 "month" = month)))
+    
   })))
 }))$flatten())
+
+
+# let's extract daily mean temperatures between 2000 and 2023 
+# temp.daily <- temp.gee$filterDate("2000-01-01" , "2023-12-31") %>%
+#  ee$ImageCollection$filter(ee$Filter$calendarRange(1, 365, 'DAY_OF_YEAR'))
 
 # mean.temp.daily <- temp.daily$map(function(img){
 #  
@@ -113,13 +132,10 @@ monthly.temp <- ee$ImageCollection$fromImages(years$map(ee_utils_pyfunc(function
 # By default, only properties that are non-NUll in the first image are exported. They might not include the output.
 task <- ee_table_to_drive(
   collection = monthly.temp,
-  description = "daily_temp_mean_canada",
+  description = "monthly_temp_mean_canada",
   folder = "GEE_imports",
-  fileFormat = "CSV",
-  selectors = list("LST_Day_1km", "year", "month")
+  fileFormat = "CSV"
 )
 task$start()
 ee_monitoring()
 
-
-Map$addLayer(monthly.temp$first(), temp23.palette)
