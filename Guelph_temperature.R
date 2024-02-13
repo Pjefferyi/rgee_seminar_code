@@ -1,4 +1,4 @@
-# This is an example of an analyais peformed using rgee and Google Earth Engine
+# This is an example of an analyis peformed using rgee and Google Earth Engine
 
 # load libraries
 lapply(X = c("terra", "tidyverse", "sf", "anytime", "rgee", "viridis"), FUN = library, 
@@ -50,6 +50,9 @@ temp.gee <- temp.gee$map(function(img){
 
 # We use filter our MODIS feature collection and extract the mean temperature durign 2023
 temp23 <- temp.gee$filter(ee$Filter$date('2023-01-01', '2023-12-31'))$select('LST_Day_1km')$mean()
+
+temp23scaled <- temp23$expression("temp.k * 0.02- 273.15", list("temp.k" = temp23$select('LST_Day_1km')))
+                                                                                                              
 
 # Let's visualize this 
 # we create a palette first 
@@ -139,3 +142,11 @@ task <- ee_table_to_drive(
 task$start()
 ee_monitoring()
 
+x$month_temp <- x$month_temp*0.02- 273.15
+
+ggplot(data = x, aes(y = month_temp, x = system.index)) + 
+  geom_line()+
+  geom_smooth(method='lm', formula= y~x)
+
+mod <- lm(month_temp ~ system.index, data = x)
+summary(mod)

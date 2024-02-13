@@ -1,0 +1,192 @@
+---
+title: "Extracting and analyzing data from Google Earth Engine using rgee"
+author: "Jelany Duali"
+date: "2024-02-13"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Temperature in Guelph
+
+### Data preparation
+
+Here, I briefly illustrate how you can extract data from  Google Earth Engine using rgee in R. Since there is a lot of talk about rising temperatures, I have decided to work with temperature data measured in the city of Guelph. 
+
+I chose Guelph because it is a small area, so processing times for the data won't be too long. 
+
+I'll start by loading some libraries (including rgee) and setting my working directory  
+
+```{r, echo=T, results = "hide", message=F}
+
+# load libraries
+lapply(X = c("terra", "tidyverse", "sf", "anytime", "rgee", "viridis"), FUN = library, 
+       character.only = TRUE)
+
+# set working directory
+setwd("C:/Users/Jelan/OneDrive/Desktop/University/University of Guelph/Other/Remote_sensing_seminar/rgee_examples/rgee_seminar_code")
+
+```
+
+### Initializing rgee
+
+Before I start Using rgee, I need to authorize it to manage Earth Engine resources, Google Drive, and Google Cloud Storage resources through my Google account. 
+
+This process should be a bit simpler than what is shown below.It seems rgee might need an update. 
+
+```{r, echo=T}
+
+# Initialize rgee and check credentials, this requires a bit more work because ee$Initialize() malfunctions
+ee$Authenticate(auth_mode='notebook')
+ee$Initialize(project='jelany-project-data')
+
+# Check that everything is working properly
+ee_check()
+```
+
+Next we want to load our spatial datasets. Fortemperature we will use the MOD11A1.061 Terra Land Surface Temperature and Emissivity Daily Global 1km.
+
+This dataset is available from the Google Earth Calendar: https://developers.google.com/earth-engine/datasets/catalog/MODIS_061_MOD11A1 
+
+For the city of Guelph, we will use a polygon dataset available here: 
+https://www.arcgis.com/apps/mapviewer/index.html?layers=6edf63b03c95423bae1ab9c590866838 
+
+This is actually a set of polygons for each property in Guelph, but I will merge those into a single polygon. As you can tell from looking at the output, there are some holes in the output, but it will do for our purposes. 
+
+We will use the guelph city polygon as a "mask" to filter through our dataset of land surface tempefature (LST). We only need data for the city of Guelph. 
+
+```{r, echo=T, message=F}
+
+# We extract the data from the GEE catalog as an image collection 
+temp.gee <- ee$ImageCollection("MODIS/061/MOD11A1")
+
+# I downloaded the Guelph city polygon dataset, so I load it and merge the polygons. 
+# At the end, I convert the polygon from the sf format to an ee.feature  object 
+sf_use_s2(FALSE)
+mask <- st_read("Property/Property.shp") 
+g.crs <-crs(mask) 
+mask <- mask %>%
+  st_as_sf() %>%
+  st_union() %>%
+  sf_as_ee()
+
+#Let's have a look at our guelph city polygon
+Map$addLayer(mask)
+
+# Let's apply the mask to our spatial dataset. We'll discard all the data in there except the one in Guelph 
+# Note that we are using functions from the Earth Engine server 
+# This is because we are working with an Earth Engine server object 
+temp.gee <- temp.gee$map(function(img){
+  img <- img$clip(mask)
+})
+
+```
+
+### What was the mean temperature in Guelph in 2023?
+
+Now that we have all our data, we can start working with it. For example, let's have a look at the mean temperature in Guelph in 2023 
+
+```{r, echo=T, message=F}
+
+# We use filter our MODIS feature collection and extract the mean temperature in 2023
+temp23 <- temp.gee$filter(ee$Filter$date('2023-01-01','2023-12-31'))$select('LST_Day_1km')$mean()
+
+# Let's visualize this 
+# we create a palette first 
+temp23.palette <- list(
+  min = 13000,
+  max = 16500,
+  palette = turbo(100)
+)
+
+# Then we add the image onto a map 
+Map$setCenter(-80.24, 43.54, 10)
+Map$addLayer(temp23, temp23.palette)
+
+```
+
+It is a bit hard to make sense of our image here, especially since their is no scale bar. 
+
+We can convert to image to a file and export it to Google drive (In this case I save it in my own account).
+
+Note that when we plot the data now, we are no longer using functions from Earth Engine. 
+
+```{r, echo=T, message=F}
+
+# We can convert the image we created to a file, we'll export it to Google Drive
+task <- ee_image_to_drive(
+  image = temp23,
+  scale = 1000, # resolution of 1 pixel per 10 kilometers
+  folder= "GEE_imports",
+  fileFormat = "GEO_TIFF",
+  region = mask)
+
+# task$start()
+# ee_monitoring()
+
+# Now we can read this file with the terra package
+guelph.temp23 <- terra::rast("rgee_guelph_temp.tif")
+plot(guelph.temp23)
+
+# the temperature here is in Kelvin, and scaled by 0.02
+
+#Let's rescale the temperature to see it in Celsius 
+guelph.temp23 <- guelph.temp23*0.02- 273.15
+plot(guelph.temp23)
+
+```
+
+It looks like downtown Guelph is a small heat island. Let's move on to a more advanced analysis 
+
+### Guelph's temperature over time 
+
+How has Guelph's temperature changed overtime since 2001? Here, I'll extract Guelph's monthly temperature for every month from 2001 to 2023. 
+
+recall that we are working with an image collection. We'll iterate through every month and year, and for each month, we will filter our collection to get all image for the month. Then, we will extract the mean temperature for the month by reducing this subset of the collection. We will store our monthly mean data, as well as year and month in a feature collection.  
+
+This process is a but similar to a nested loop in R. We loop through each year, and for each month in a given year. 
+
+```{r, echo=T, message=F}
+
+# The years and month that we will be ierating through 
+years <- ee$List$sequence(2001 , 2023)
+months <- ee$List$sequence(01 , 12)
+
+# let's extract the data 
+monthly.temp <- ee$FeatureCollection(years$map(ee_utils_pyfunc(function(year){
+  return(months$map(ee_utils_pyfunc(function(month){
+    
+    monthly.img <- temp.gee$filter(ee$Filter$calendarRange(year, year, "year"))$
+             filter(ee$Filter$calendarRange(month, month, "month"))$
+             select('LST_Day_1km')$mean()
+    
+    monthly.temp <- monthly.img$clip(mask)$reduceRegion(reducer = ee$Reducer$mean())
+    
+    return(ee$Feature(NULL, list("month_temp" = monthly.temp$get("LST_Day_1km"), 
+                                 'year' = year, 
+                                 "month" = month)))
+    
+  })))
+}))$flatten())
+
+```
+
+Again, I'll export the output to Google Drive, download it, and load it in R
+
+```{r, echo=T, message=F}
+
+#export the output to Google Drive
+# By default, only properties that are non-NUll in the first image are exported. They might not include the output.
+task <- ee_table_to_drive(
+  collection = monthly.temp,
+  description = "monthly_temp_mean_canada",
+  folder = "GEE_imports",
+  fileFormat = "CSV")
+
+#task$start()
+#ee_monitoring()
+
+
+```
