@@ -9,13 +9,11 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-## Temperature in Guelph
-
-### Data preparation
+## A look at temperature at land surface temperature in Guelph, Ontario
 
 Here, I briefly illustrate how you can extract data from  Google Earth Engine using rgee in R. Since there is a lot of talk about rising temperatures, I have decided to work with temperature data measured in the city of Guelph. 
 
-I chose Guelph because it is a small area, so processing times for the data won't be too long. 
+I chose Guelph because it is a small area, so processing times for the data won't be too long.
 
 I'll start by loading some libraries (including rgee) and setting my working directory  
 
@@ -32,9 +30,9 @@ setwd("C:/Users/Jelan/OneDrive/Desktop/University/University of Guelph/Other/Rem
 
 ### Initializing rgee
 
-Before I start Using rgee, I need to authorize it to manage Earth Engine resources, Google Drive, and Google Cloud Storage resources through my Google account. 
+Before we start using rgee, we need to authorize it to manage Earth Engine, Google Drive, and Google Cloud Storage through my Google account. 
 
-This process should be a bit simpler than what is shown below.It seems rgee might need an update. 
+This process is usually a bit simpler than what is shown below. There is currently a known issue related to the ee$Initialize() function, so I have to work around it. 
 
 ```{r, echo=T}
 
@@ -46,16 +44,16 @@ ee$Initialize(project='jelany-project-data')
 ee_check()
 ```
 
-Next we want to load our spatial datasets. Fortemperature we will use the MOD11A1.061 Terra Land Surface Temperature and Emissivity Daily Global 1km.
+Next we want to load our spatial datasets. For temperature we will use the MOD11A1.061 dataset, which we will extract as an image collection.
 
 This dataset is available from the Google Earth Calendar: https://developers.google.com/earth-engine/datasets/catalog/MODIS_061_MOD11A1 
 
-For the city of Guelph, we will use a polygon dataset available here: 
+We will also need a polygon outlining the city of Guelph, we will use a simple polygon dataset available here: 
 https://www.arcgis.com/apps/mapviewer/index.html?layers=6edf63b03c95423bae1ab9c590866838 
 
-This is actually a set of polygons for each property in Guelph, but I will merge those into a single polygon. As you can tell from looking at the output, there are some holes in the output, but it will do for our purposes. 
+This is actually a set of polygons for each property in Guelph, but we will merge those into a single polygon. As you can tell from looking at the output, there are a few artefacts inside our polygon, but that's fine. 
 
-We will use the guelph city polygon as a "mask" to filter through our dataset of land surface tempefature (LST). We only need data for the city of Guelph. 
+We will use the Guelph city polygon as a "mask" to filter through our dataset of land surface tempetature (LST). This is because we only need data for the city of Guelph. 
 
 ```{r, echo=T, message=F}
 
@@ -73,6 +71,7 @@ mask <- mask %>%
   sf_as_ee()
 
 #Let's have a look at our guelph city polygon
+Map$setCenter(-80.24, 43.54, 10)
 Map$addLayer(mask)
 
 # Let's apply the mask to our spatial dataset. We'll discard all the data in there except the one in Guelph 
@@ -90,7 +89,7 @@ Now that we have all our data, we can start working with it. For example, let's 
 
 ```{r, echo=T, message=F}
 
-# We use filter our MODIS feature collection and extract the mean temperature in 2023
+# We filter our MODIS feature collection and extract the mean temperature in 2023
 temp23 <- temp.gee$filter(ee$Filter$date('2023-01-01','2023-12-31'))$select('LST_Day_1km')$mean()
 
 # Let's visualize this 
@@ -107,11 +106,11 @@ Map$addLayer(temp23, temp23.palette)
 
 ```
 
-It is a bit hard to make sense of our image here, especially since their is no scale bar. 
+It is a bit hard to make sense of our the image produced here, especially since there is no scale bar. 
 
 We can convert to image to a file and export it to Google drive (In this case I save it in my own account).
 
-Note that when we plot the data now, we are no longer using functions from Earth Engine. 
+Note that when we plot the data now, we are no longer using functions from Earth Engine. The scale of the MODIS/061/MOD11A1 dataset is 1x1 km, so this is the size of our pixels. 
 
 ```{r, echo=T, message=F}
 
@@ -144,13 +143,13 @@ It looks like downtown Guelph is a small heat island. Let's move on to a more ad
 
 How has Guelph's temperature changed overtime since 2001? Here, I'll extract Guelph's monthly temperature for every month from 2001 to 2023. 
 
-recall that we are working with an image collection. We'll iterate through every month and year, and for each month, we will filter our collection to get all image for the month. Then, we will extract the mean temperature for the month by reducing this subset of the collection. We will store our monthly mean data, as well as year and month in a feature collection.  
+Recall that we are working with an image collection. We'll iterate through every month and year, and for each month, we will filter our collection to get all image for the month. Then, we will extract the mean temperature for the month by reducing all images in that sub collection. We will store our monthly mean data, as well as year and month in a feature collection.  
 
-This process is a but similar to a nested loop in R. We loop through each year, and for each month in a given year. 
+This process is a but similar to a nested loop in R. We loop through each year, and through each month in a year. 
 
 ```{r, echo=T, message=F}
 
-# The years and month that we will be ierating through 
+# The years and month that we will be iterating through 
 years <- ee$List$sequence(2001 , 2023)
 months <- ee$List$sequence(01 , 12)
 
@@ -188,5 +187,36 @@ task <- ee_table_to_drive(
 #task$start()
 #ee_monitoring()
 
+# Let's load our data and have a look a it 
+monthly.temp <- read.csv("monthly_temp_mean_Guelph.csv")
+head(monthly.temp)
+```
+
+Now, we can plot our temperature data using ggplot. I'll just do a bit of work first so we have a date for each data point, and to convert our measurements from Kelvin to Celcius
+
+```{r, echo=T, message=F}
+
+# Add a column with dates (every monthly mean is set to the 1st of the month)
+monthly.temp$Date <- anytime(paste0(monthly.temp$year, "-", monthly.temp$month))
+
+# Convert from Kelvin to Celcius
+monthly.temp$month_temp <- monthly.temp$month_temp*0.02- 273.15
+
+# We create our plot
+ggplot(data = monthly.temp, aes(y = month_temp, x = Date)) + 
+  geom_line()+
+  geom_smooth(method='lm', formula= y~x)+
+  labs(x = "Date", y = "Temperature")
+
+```
+
+We can also use the stl function (available in Base R) to Decompose our time series into seasonal, trend and irregular components.
+
+```{r, echo=T, message=F}
+
+temp.ts <- ts(data = monthly.temp$month_temp, start = c(2001, 1), end = c(2023,12), deltat = 1/12) 
+temp.comp <- stl(temp.ts, s.window = 'periodic')
+
+plot(temp.comp)
 
 ```
