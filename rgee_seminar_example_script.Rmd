@@ -32,9 +32,12 @@ setwd("C:/Users/Jelan/OneDrive/Desktop/University/University of Guelph/Other/Rem
 
 Before we start using rgee, we need to authorize it to manage Earth Engine, Google Drive, and Google Cloud Storage through my Google account. 
 
-This process is usually a bit simpler than what is shown below. There is currently a known issue related to the ee$Initialize() function, so I have to work around it. 
+This process is usually a bit simpler than what is shown below. I think there is currently an issue related to the ee$Initialize() function and I have to work around it. 
 
 ```{r, echo=T}
+# Set python environment
+earthengine_python <- Sys.getenv("EARTHENGINE_PYTHON", unset = NA)
+Sys.setenv(RETICULATE_PYTHON = earthengine_python)
 
 # Initialize rgee and check credentials, this requires a bit more work because ee$Initialize() malfunctions
 ee$Authenticate(auth_mode='notebook')
@@ -42,6 +45,7 @@ ee$Initialize(project='jelany-project-data')
 
 # Check that everything is working properly
 ee_check()
+
 ```
 
 Next we want to load our spatial datasets. For temperature we will use the MOD11A1.061 dataset, which we will extract as an image collection.
@@ -210,7 +214,7 @@ ggplot(data = monthly.temp, aes(y = month_temp, x = Date)) +
 
 ```
 
-We can also use the stl function (available in Base R) to Decompose our time series into seasonal, trend and irregular components.
+We can also use the stl function (available in Base R) to decompose our time series into seasonal, trend and irregular components.
 
 ```{r, echo=T, message=F}
 
