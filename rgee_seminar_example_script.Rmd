@@ -9,7 +9,7 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-## A look at temperature at land surface temperature in Guelph, Ontario
+## A look at land surface temperature in Guelph, Ontario
 
 Here, I briefly illustrate how you can extract data from  Google Earth Engine using rgee in R. Since there is a lot of talk about rising temperatures, I have decided to work with temperature data measured in the city of Guelph. 
 
